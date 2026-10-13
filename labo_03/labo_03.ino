@@ -5,6 +5,8 @@
 
 MeRGBLed led(PORT0, LEDNUM);
 MeUltrasonicSensor sonar(PORT_10);
+MeEncoderOnBoard Encoder_1(SLOT1);
+MeEncoderOnBoard Encoder_2(SLOT2);
 
 const int m1_pwm = 11;
 const int m1_in1 = 48;
@@ -43,10 +45,53 @@ State currentState = WAITING;
 unsigned long currentTime = 0;
 unsigned long stateStartTime = 0;
 
+void isr_process_encoder1(void)
+{
+  if (digitalRead(Encoder_1.getPortB()) == 0)
+  {
+    Encoder_1.pulsePosMinus();
+  }
+  else
+  {
+    Encoder_1.pulsePosPlus();
+  }
+}
+
+void isr_process_encoder2(void)
+{
+  if (digitalRead(Encoder_2.getPortB()) == 0)
+  {
+    Encoder_2.pulsePosMinus();
+  }
+  else
+  {
+    Encoder_2.pulsePosPlus();
+  }
+}
 
 void setup()
 {
   Serial.begin(115200);
+  attachInterrupt(Encoder_1.getIntNum(), isr_process_encoder1, RISING);
+  attachInterrupt(Encoder_2.getIntNum(), isr_process_encoder2, RISING);
+
+  TCCR1A = _BV(WGM10);
+  TCCR1B = _BV(CS11) | _BV(WGM12);
+
+  TCCR2A = _BV(WGM21) | _BV(WGM20);
+  TCCR2B = _BV(CS21);
+
+  Encoder_1.setPulse(9);
+  Encoder_2.setPulse(9);
+
+  Encoder_1.setRatio(39.267);
+  Encoder_2.setRatio(39.267);
+
+  Encoder_1.setPosPid(1.8, 0, 1.2);
+  Encoder_2.setPosPid(1.8, 0, 1.2);
+
+  Encoder_1.setSpeedPid(0.18, 0, 0);
+  Encoder_2.setSpeedPid(0.18, 0, 0);
 
   led.setpin(LEDPIN);
   led.setColor(0, 0, 0);
@@ -95,7 +140,14 @@ void stateManager(unsigned long cT)
       break;
 
     case SEGMENT_1:
-      // Avancer jusqu'à la distance X
+      if (cT - stateStartTime < 1000)
+      {
+        avancerDroit(80);
+      }
+      else
+      {
+        stopMoteurs();
+      }
       break;
 
     case PIVOT_1:
@@ -128,14 +180,17 @@ void stateManager(unsigned long cT)
 // Tâches
 void encoderTask(unsigned long cT)
 {
-  const unsigned long rate = 20;
+  // const unsigned long rate = 20;
 
-  if (cT - lastEncoder < rate)
-  {
-    return;
-  }
+  // if (cT - lastEncoder < rate)
+  // {
+  //   return;
+  // }
 
-  lastEncoder = cT;
+  // lastEncoder = cT;
+
+  Encoder_1.loop();
+  Encoder_2.loop();
 
 }
 
@@ -197,23 +252,24 @@ void serialTask(unsigned long cT)
   Serial.print("Distance = ");
   Serial.print(distance);
   Serial.println(" cm");
+
   Serial.print("Etat = ");
   Serial.println(currentState); 
+
+  Serial.print("Encodeur 1 = ");
+  Serial.println(Encoder_1.getCurPos());
+
+  Serial.print("Encodeur 2 = ");
+  Serial.println(Encoder_2.getCurPos());
 }
 
 
 // Mouvements
-void avancerDroit(int pwm){
-  digitalWrite(m1_in2, LOW);
-  digitalWrite(m1_in1, HIGH);
-  analogWrite(m1_pwm, pwm);
-
-  digitalWrite(m2_in2, LOW);
-  digitalWrite(m2_in1, HIGH);
-  analogWrite(m2_pwm, pwm);
-
+void avancerDroit(int pwm)
+{
+  Encoder_1.setMotorPwm(-pwm);
+  Encoder_2.setMotorPwm(pwm);
 }
-
 
 bool pivoter(float angle)
 {
@@ -223,6 +279,6 @@ bool pivoter(float angle)
 
 void stopMoteurs()
 {
-  analogWrite(m1_pwm, 0);
-  analogWrite(m2_pwm, 0);
+  Encoder_1.setMotorPwm(0);
+  Encoder_2.setMotorPwm(0);
 }
