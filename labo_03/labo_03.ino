@@ -22,6 +22,9 @@ double distance = 0;
 
 unsigned long lastSonar = 0;
 unsigned long lastPrint = 0;
+unsigned long lastEncoder = 0;
+unsigned long lastGyro = 0;
+unsigned long lastLed = 0;
 
 enum State
 {
@@ -92,21 +95,27 @@ void stateManager(unsigned long cT)
       break;
 
     case SEGMENT_1:
+      // Avancer jusqu'à la distance X
       break;
 
     case PIVOT_1:
+        // Pivoter de 90 degrés à droite
       break;
 
     case SEGMENT_2:
+        // Avancer jusqu'à 30 cm de l'obstacle
       break;
 
     case PIVOT_2:
+        // Pivoter de 90 degrés à gauche
       break;
 
     case SEGMENT_3:
+      // Avancer jusqu'à la distance X
       break;
 
     case PIVOT_180:
+      // Pivoter de 180 degrés
       break;
 
     case FIN:
@@ -119,12 +128,28 @@ void stateManager(unsigned long cT)
 // Tâches
 void encoderTask(unsigned long cT)
 {
+  const unsigned long rate = 20;
+
+  if (cT - lastEncoder < rate)
+  {
+    return;
+  }
+
+  lastEncoder = cT;
 
 }
 
 
 void gyroTask(unsigned long cT)
 {
+  const unsigned long rate = 20;
+
+  if (cT - lastGyro < rate)
+  {
+    return;
+  }
+
+  lastGyro = cT;
 
 }
 
@@ -144,6 +169,16 @@ void sonarTask(unsigned long cT)
 
 void ledTask(unsigned long cT)
 {
+  const unsigned long rate = 100;
+
+  if (cT - lastLed < rate)
+  {
+    return;
+  }
+
+  lastLed = cT;
+
+
   
 }
 
@@ -162,6 +197,8 @@ void serialTask(unsigned long cT)
   Serial.print("Distance = ");
   Serial.print(distance);
   Serial.println(" cm");
+  Serial.print("Etat = ");
+  Serial.println(currentState); 
 }
 
 
