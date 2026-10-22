@@ -665,12 +665,11 @@ void ledTask(unsigned long cT)
     }
   }
 
-  // afficher l'arc-en-ciel pendant le bonus
-  if (enRetour())
+  // afficher l'arc-en-ciel pendant le retour et a la fin
+  if (enRetour() || currentState == FIN_BONUS)
   {
     arcEnCielTask(cT);
   }
-
   led.show();
 }
 
