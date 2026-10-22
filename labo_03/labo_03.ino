@@ -5,13 +5,13 @@
 #define LEDNUM 12
 #define LEDPIN 44
 
-// ========================================
-// LABORATOIRE 03 - DA 2421657
-// Deux derniers chiffres du DA : 57
-// DA[6] = 7 (impair)
-// Premier pivot : 90 degres a droite
-// Deuxieme pivot : 90 degres a gauche
-// ========================================
+// laboratoire 03 - livraison autonome
+// da : 2421657
+// deux derniers chiffres : 57
+// da[6] = 7 (impair)
+// premier pivot : droite 90 degres
+// deuxieme pivot : gauche 90 degres
+// dernier pivot : 180 degres
 
 MeRGBLed led(PORT0, LEDNUM);
 MeUltrasonicSensor sonar(PORT_10);
@@ -20,18 +20,19 @@ MeEncoderOnBoard encoderLeft(SLOT2);
 MeEncoderOnBoard encoderRight(SLOT1);
 MeGyro gyro(0, 0x69);
 
+// constantes
+
 const float X = 120.0;
 const float diametreRoue = 6.5;
-
-const int vitesse = 100;
-const int vitesseSegment2 = 60;
-const int vitessePivot = 50;
-
 const float distanceObstacle = 30.0;
 
-// ========================================
-// MACHINE A ETATS
-// ========================================
+// meme vitesse pour les trois segments
+const int vitesse = 100;
+
+// vitesse utilisee seulement pour pivoter
+const int vitessePivot = 50;
+
+// machine a etats
 
 enum Etat
 {
@@ -39,12 +40,17 @@ enum Etat
   SEGMENT_1,
   PIVOT_DROITE,
   SEGMENT_2,
-  FIN
+  PIVOT_GAUCHE,
+  SEGMENT_3,
+  PIVOT_180,
+  FIN,
+  ERREUR
 };
 
 Etat etat = ATTENTE;
 
 unsigned long debutEtat = 0;
+unsigned long debutPivot = 0;
 
 long departGauche = 0;
 long departDroite = 0;
@@ -52,18 +58,14 @@ long departDroite = 0;
 bool premiereFois = true;
 
 float angleDepart = 0;
-const float angleCible = 90.0;
-
-unsigned long debutPivot = 0;
-
 float distanceDebutSegment2 = 0;
 float distanceSonar = 0;
 
-bool obstacleDetecte = false;
+bool segment1Termine = false;
+bool segment2Termine = false;
+bool segment3Termine = false;
 
-// ========================================
-// INTERRUPTIONS DES ENCODEURS
-// ========================================
+// interruptions des encodeurs
 
 void interruptionDroite()
 {
@@ -81,9 +83,7 @@ void interruptionGauche()
     encoderLeft.pulsePosPlus();
 }
 
-// ========================================
-// CONFIGURATION DES ENCODEURS
-// ========================================
+// configuration des encodeurs
 
 void configEncodeurs()
 {
@@ -118,9 +118,7 @@ void configEncodeurs()
   encoderRight.setSpeedPid(0.18, 0, 0);
 }
 
-// ========================================
-// ARRET DES MOTEURS
-// ========================================
+// arret des moteurs
 
 void Stop()
 {
@@ -128,62 +126,59 @@ void Stop()
   encoderRight.setMotorPwm(0);
 }
 
-// ========================================
-// AVANCER DROIT AVEC LE GYROSCOPE
-// ========================================
+// avancer droit avec le gyroscope
 
 void goStraight(short speed = 100, short firstRun = 0)
 {
   static double localGoal = 0.0;
-
-  const double kp = 4.75;
-  const double kd = 1.0;
-
   static double previousError = 0.0;
+
+  const double kp = 10.0;
+  const double kd = 1.0;
 
   if (firstRun)
   {
-    gyro.resetData();
-
     localGoal = gyro.getAngleZ();
     previousError = 0;
-
     return;
   }
 
   double error = gyro.getAngleZ() - localGoal;
-
-  double output =
-    kp * error + kd * (error - previousError);
+  double output = kp * error + kd * (error - previousError);
 
   previousError = error;
 
-  encoderLeft.setMotorPwm(speed - output);
-  encoderRight.setMotorPwm(-speed - output);
+  encoderLeft.setMotorPwm(
+    constrain(speed - output, -255, 255)
+  );
+
+  encoderRight.setMotorPwm(
+    constrain(-speed - output, -255, 255)
+  );
 }
 
-// ========================================
-// CALCULER LA DISTANCE PARCOURUE
-// ========================================
+// distance avec les encodeurs
 
 float distanceParcourue()
 {
-  float gauche = abs(
-    encoderLeft.getCurPos() - departGauche
-  );
+  float gauche =
+    abs(encoderLeft.getCurPos() - departGauche);
 
-  float droite = abs(
-    encoderRight.getCurPos() - departDroite
-  );
+  float droite =
+    abs(encoderRight.getCurPos() - departDroite);
 
   float moyenne = (gauche + droite) / 2.0;
 
   return moyenne * PI * diametreRoue / 360.0;
 }
 
-// ========================================
-// CHANGER D'ETAT
-// ========================================
+void initialiserDistance()
+{
+  departGauche = encoderLeft.getCurPos();
+  departDroite = encoderRight.getCurPos();
+}
+
+// changement d'etat
 
 void changerEtat(Etat nouvelEtat, unsigned long cT)
 {
@@ -194,9 +189,7 @@ void changerEtat(Etat nouvelEtat, unsigned long cT)
   premiereFois = true;
 }
 
-// ========================================
-// ETAPE 1 : ATTENDRE 3 SECONDES
-// ========================================
+// attente de 3 secondes
 
 void attenteTask(unsigned long cT)
 {
@@ -208,35 +201,30 @@ void attenteTask(unsigned long cT)
   }
 }
 
-// ========================================
-// ETAPE 2 : AVANCER DE 120 CM
-// ========================================
+// segment 1 - 120 cm
 
 void segment1Task(unsigned long cT)
 {
   static unsigned long lastTime = 0;
-  const unsigned long rate = 20;
 
   if (premiereFois)
   {
-    departGauche = encoderLeft.getCurPos();
-    departDroite = encoderRight.getCurPos();
-
+    initialiserDistance();
     goStraight(vitesse, 1);
 
     premiereFois = false;
     lastTime = cT;
-
     return;
   }
 
-  if (cT - lastTime < rate)
+  if (cT - lastTime < 20)
     return;
 
   lastTime = cT;
 
   if (distanceParcourue() >= X)
   {
+    segment1Termine = true;
     changerEtat(PIVOT_DROITE, cT);
     return;
   }
@@ -244,14 +232,11 @@ void segment1Task(unsigned long cT)
   goStraight(vitesse);
 }
 
-// ========================================
-// ETAPE 3 : PIVOT DE 90 DEGRES A DROITE
-// ========================================
+// fonction commune aux pivots
 
-void pivotDroiteTask(unsigned long cT)
+bool effectuerPivot(unsigned long cT, int direction, float angleCible)
 {
   static unsigned long lastTime = 0;
-  const unsigned long rate = 20;
 
   if (premiereFois)
   {
@@ -262,107 +247,179 @@ void pivotDroiteTask(unsigned long cT)
 
     premiereFois = false;
     lastTime = cT;
-
-    return;
+    return false;
   }
 
-  if (cT - lastTime < rate)
-    return;
+  if (cT - lastTime < 20)
+    return false;
 
   lastTime = cT;
 
-  float angleActuel = gyro.getAngleZ();
-
   float angleTourne =
-    abs(angleActuel - angleDepart);
+    abs(gyro.getAngleZ() - angleDepart);
 
-  // Arret lorsque le pivot atteint 90 degres
+  // arret lorsque l'angle demande est atteint
   if (angleTourne >= angleCible)
   {
-    changerEtat(SEGMENT_2, cT);
-    return;
+    Stop();
+    return true;
   }
 
-  // Securite : ne pas continuer si le pivot echoue
+  // securite contre une rotation sans fin
   if (cT - debutPivot >= 5000)
   {
-    changerEtat(FIN, cT);
-    return;
+    changerEtat(ERREUR, cT);
+    return false;
   }
 
-  encoderLeft.setMotorPwm(vitessePivot);
-  encoderRight.setMotorPwm(vitessePivot);
+  // direction = 1 : droite
+  // direction = -1 : gauche
+  encoderLeft.setMotorPwm(
+    direction * vitessePivot
+  );
+
+  encoderRight.setMotorPwm(
+    direction * vitessePivot
+  );
+
+  return false;
 }
 
-// ========================================
-// ETAPE 4 : SEGMENT 2 - ARRET A 30 CM
-// ========================================
+// premier pivot - droite 90 degres
+
+void pivotDroiteTask(unsigned long cT)
+{
+  if (effectuerPivot(cT, 1, 90.0))
+  {
+    changerEtat(SEGMENT_2, cT);
+  }
+}
+
+// segment 2 - arret a 30 cm
 
 void segment2Task(unsigned long cT)
 {
   static unsigned long lastTime = 0;
-  const unsigned long rate = 50;
 
   if (premiereFois)
   {
     Stop();
+    initialiserDistance();
 
     distanceDebutSegment2 = sonar.distanceCm();
     distanceSonar = distanceDebutSegment2;
 
-    departGauche = encoderLeft.getCurPos();
-    departDroite = encoderRight.getCurPos();
+    if (distanceSonar <= 0)
+    {
+      changerEtat(ERREUR, cT);
+      return;
+    }
 
-    obstacleDetecte = false;
+    if (distanceSonar <= distanceObstacle)
+    {
+      segment2Termine = true;
+      changerEtat(PIVOT_GAUCHE, cT);
+      return;
+    }
 
-    goStraight(vitesseSegment2, 1);
+    goStraight(vitesse, 1);
 
     premiereFois = false;
     lastTime = cT;
-
     return;
   }
 
-  if (cT - lastTime < rate)
+  if (cT - lastTime < 50)
     return;
 
   lastTime = cT;
 
   distanceSonar = sonar.distanceCm();
 
-  // Si l'obstacle est a 30 cm ou moins
+  // arret a 30 cm de l'obstacle
   if (distanceSonar > 0 &&
       distanceSonar <= distanceObstacle)
   {
-    obstacleDetecte = true;
-    changerEtat(FIN, cT);
+    segment2Termine = true;
+    changerEtat(PIVOT_GAUCHE, cT);
     return;
   }
 
-  // Securite : ne pas avancer si le sonar
-  // ne donne pas une mesure valide
+  // mesure invalide : arret de securite
   if (distanceSonar <= 0)
   {
-    obstacleDetecte = false;
-    changerEtat(FIN, cT);
+    changerEtat(ERREUR, cT);
     return;
   }
 
-  goStraight(vitesseSegment2);
+  // meme vitesse que les segments 1 et 3
+  goStraight(vitesse);
 }
 
-// ========================================
-// FIN DU TEST
-// ========================================
+// deuxieme pivot - gauche 90 degres
+
+void pivotGaucheTask(unsigned long cT)
+{
+  if (effectuerPivot(cT, -1, 90.0))
+  {
+    changerEtat(SEGMENT_3, cT);
+  }
+}
+
+// segment 3 - 120 cm
+
+void segment3Task(unsigned long cT)
+{
+  static unsigned long lastTime = 0;
+
+  if (premiereFois)
+  {
+    initialiserDistance();
+    goStraight(vitesse, 1);
+
+    premiereFois = false;
+    lastTime = cT;
+    return;
+  }
+
+  if (cT - lastTime < 20)
+    return;
+
+  lastTime = cT;
+
+  if (distanceParcourue() >= X)
+  {
+    segment3Termine = true;
+    changerEtat(PIVOT_180, cT);
+    return;
+  }
+
+  goStraight(vitesse);
+}
+
+// dernier pivot - 180 degres
+
+void pivot180Task(unsigned long cT)
+{
+  if (effectuerPivot(cT, 1, 180.0))
+  {
+    changerEtat(FIN, cT);
+  }
+}
+
+// fin et erreur
 
 void finTask(unsigned long cT)
 {
   Stop();
 }
 
-// ========================================
-// MACHINE A ETATS
-// ========================================
+void erreurTask(unsigned long cT)
+{
+  Stop();
+}
+
+// machine a etats (fsm)
 
 void stateTask(unsigned long cT)
 {
@@ -384,77 +441,73 @@ void stateTask(unsigned long cT)
       segment2Task(cT);
       break;
 
+    case PIVOT_GAUCHE:
+      pivotGaucheTask(cT);
+      break;
+
+    case SEGMENT_3:
+      segment3Task(cT);
+      break;
+
+    case PIVOT_180:
+      pivot180Task(cT);
+      break;
+
     case FIN:
       finTask(cT);
+      break;
+
+    case ERREUR:
+      erreurTask(cT);
       break;
   }
 }
 
-// ========================================
-// TACHE DU GYROSCOPE
-// ========================================
+// gyroscope
 
 void gyroTask(unsigned long cT)
 {
   static unsigned long lastTime = 0;
-  const unsigned long rate = 20;
 
-  if (cT - lastTime < rate)
+  if (cT - lastTime < 20)
     return;
 
   lastTime = cT;
-
   gyro.update();
 }
 
-// ========================================
-// TACHE DES DEL
-// ========================================
+// del de progression
 
 void ledTask(unsigned long cT)
 {
   static unsigned long lastTime = 0;
-  const unsigned long rate = 50;
 
-  if (cT - lastTime < rate)
+  if (cT - lastTime < 50)
     return;
 
   lastTime = cT;
 
   led.setColor(0, 0, 0, 0);
 
-  // Etape 1 : DEL jaunes pendant 3 secondes
+  // demarrage : toutes les del jaunes
   if (etat == ATTENTE)
   {
     led.setColor(0, 20, 20, 0);
   }
 
-  // Segment 1 : progression des DEL 1 a 7
+  // barre de progression segment 1
   if (etat == SEGMENT_1)
   {
-    float progression = distanceParcourue() / X;
-
-    progression = constrain(
-      progression, 0.0, 1.0
-    );
+    float progression =
+      constrain(distanceParcourue() / X, 0.0, 1.0);
 
     int nombreLeds = progression * 7;
 
     for (int i = 1; i <= nombreLeds; i++)
-    {
       led.setColor(i, 0, 255, 0);
-    }
   }
 
-  // DEL 12 reste verte apres le segment 1
-  if (etat == PIVOT_DROITE ||
-      etat == SEGMENT_2 ||
-      etat == FIN)
-  {
-    led.setColor(12, 0, 255, 0);
-  }
-
-  // Segment 2 : nouvelle barre de progression
+  // barre de progression segment 2
   if (etat == SEGMENT_2)
   {
     float distancePrevue =
@@ -462,42 +515,71 @@ void ledTask(unsigned long cT)
 
     if (distancePrevue > 0)
     {
-      float progression =
-        distanceParcourue() / distancePrevue;
-
-      progression = constrain(
-        progression, 0.0, 1.0
+      float progression = constrain(
+        distanceParcourue() / distancePrevue,
+        0.0,
+        1.0
       );
 
       int nombreLeds = progression * 7;
 
       for (int i = 1; i <= nombreLeds; i++)
-      {
         led.setColor(i, 0, 255, 0);
-      }
     }
   }
 
-  // DEL 11 verte seulement si l'obstacle
-  // a bien ete detecte a 30 cm
-  if (etat == FIN && obstacleDetecte)
+  // barre de progression segment 3
+  if (etat == SEGMENT_3)
   {
+    float progression =
+      constrain(distanceParcourue() / X, 0.0, 1.0);
+
+    int nombreLeds = progression * 7;
+
+    for (int i = 1; i <= nombreLeds; i++)
+      led.setColor(i, 0, 255, 0);
+  }
+
+  // del des segments termines
+  if (segment1Termine)
+    led.setColor(12, 0, 255, 0);
+
+  if (segment2Termine)
     led.setColor(11, 0, 255, 0);
+
+  if (segment3Termine)
+    led.setColor(10, 0, 255, 0);
+
+  // fin : clignotement a 10 hz
+  if (etat == FIN)
+  {
+    bool allume = (cT / 50) % 2 == 0;
+
+    for (int i = 8; i <= 12; i++)
+    {
+      if (allume)
+        led.setColor(i, 0, 255, 0);
+      else
+        led.setColor(i, 0, 0, 0);
+    }
+  }
+
+  // erreur : del rouges
+  if (etat == ERREUR)
+  {
+    led.setColor(0, 255, 0, 0);
   }
 
   led.show();
 }
 
-// ========================================
-// MONITEUR SERIE
-// ========================================
+// affichage dans le moniteur serie
 
 void serialTask(unsigned long cT)
 {
   static unsigned long lastTime = 0;
-  const unsigned long rate = 250;
 
-  if (cT - lastTime < rate)
+  if (cT - lastTime < 250)
     return;
 
   lastTime = cT;
@@ -513,12 +595,11 @@ void serialTask(unsigned long cT)
 
   Serial.print(" | Sonar : ");
   Serial.print(distanceSonar);
+
   Serial.println(" cm");
 }
 
-// ========================================
-// SETUP
-// ========================================
+// setup
 
 void setup()
 {
@@ -541,9 +622,7 @@ void setup()
   Serial.println("Attente de 3 secondes");
 }
 
-// ========================================
-// LOOP
-// ========================================
+// loop
 
 void loop()
 {
