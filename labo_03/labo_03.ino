@@ -5,26 +5,18 @@
 #define LEDNUM 12
 #define LEDPIN 44
 
-// laboratoire 03 : livraison autonome
-// da : 2421657, deux derniers chiffres : 57
-// da[6] = 7, impair : premier pivot a droite
-// deuxieme pivot a gauche et dernier pivot de 180 degres
-// bonus : retour a la base avec animation arc-en-ciel
-
 MeRGBLed led(PORT0, LEDNUM);
 MeUltrasonicSensor sonar(PORT_10);
 MeEncoderOnBoard encoderLeft(SLOT2);
 MeEncoderOnBoard encoderRight(SLOT1);
 MeGyro gyro(0, 0x69);
 
-// distances et vitesses
 const float X = 150.0;
 const float diametreRoue = 6.5;
 const float distanceObstacle = 30.0;
 const int vitesse = 100;
 const int vitessePivot = 50;
 
-// etats du robot
 enum State
 {
   WAITING,
